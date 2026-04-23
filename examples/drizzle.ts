@@ -1,10 +1,7 @@
-import { drizzle } from "drizzle-orm/node-postgres";
-import { users } from "./schema";
+import { db, users } from "./schema";
 import { eq } from "drizzle-orm";
 
-const db = drizzle(process.env.DATABASE_URL!);
-
-async function getUser(db: ReturnType<typeof drizzle>, id: number) {
+async function getUser(db: typeof db, id: number) {
   return db.select().from(users).where(eq(users.id, id));
 }
 
