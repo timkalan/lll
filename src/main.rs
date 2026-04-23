@@ -1,7 +1,16 @@
+use anyhow::Context;
+use clap::Parser;
 use rig::client::{CompletionClient, ProviderClient};
-use rig::providers::openrouter;
+use rig::providers::gemini;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+
+#[derive(Parser, Debug)]
+#[command(name = "lll", version, about = "Large Language Lint")]
+struct Args {
+    /// File to lint
+    file: String,
+}
 
 #[derive(Deserialize, Serialize, JsonSchema, Debug)]
 enum Severity {
@@ -24,20 +33,14 @@ struct LintOutput {
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    let code = r#"
-  fn calculate_average(numbers: &[f64]) -> f64 {
-      let mut sum = 0.0;
-      for i in 0..numbers.len() {
-          sum += numbers[i];
-      }
-      sum / numbers.len() as f64  // crashes on empty slice
-  }
-  "#;
+    let args = Args::parse();
+    let code = std::fs::read_to_string(&args.file)
+        .with_context(|| format!("Could not read file: {}", args.file))?;
 
-    let client = openrouter::Client::from_env();
+    let client = gemini::Client::from_env();
 
     let linter = client
-        .extractor::<LintOutput>("deepseek/deepseek-v3.2")
+        .extractor::<LintOutput>("gemini-3.1-flash-lite-preview")
         .preamble(
             "You are a code linter. Analyze the provided code and return diagnostics. \
              Each diagnostic must have: \
@@ -48,7 +51,7 @@ async fn main() -> Result<(), anyhow::Error> {
         )
         .build();
 
-    let response = linter.extract(code).await?;
+    let response = linter.extract(&code).await?;
 
     println!("{response:#?}");
 
