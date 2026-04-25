@@ -5,13 +5,13 @@ use rig::client::{CompletionClient, ProviderClient};
 use rig::providers::gemini;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
-const PROMPT: &str = "You are a code linter. Analyze the provided code and return diagnostics.
-             Each diagnostic must have: \
-                - severity: one of Error, Warning, or Suggestion \
-                - code_quote: the exact code snippet from the input that the diagnostic refers to \
-                - message: a short explanation of the issue \
-            Return your findings using the provided tool.";
+const PROMPT: &str = "
+    You are a code linter. Analyze the provided code and return diagnostics.
+    Your goal is to catch things other linters might miss. Do not simply return what a generic
+    linter for the given language might produce, but try to catch un-idiomatic behaviour or
+    other general weirdness.";
 
 #[derive(Parser, Debug)]
 #[command(name = "lll", version, about = "Large Language Lint")]
@@ -69,9 +69,16 @@ async fn main() -> Result<(), anyhow::Error> {
     let linter = client
         .extractor::<LintOutput>("gemini-3.1-flash-lite-preview")
         .preamble(PROMPT)
+        .additional_params(json!({
+            "generationConfig": {
+                "temperature": 0
+            }
+        }))
         .build();
 
-    let response = linter.extract(&code).await?;
+    let response = linter
+        .extract(format!("File: {}\n\n{}", args.file, code))
+        .await?;
 
     print_diagnostics(&response);
 
