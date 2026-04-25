@@ -48,7 +48,8 @@ fn resolve_snippet(code: &str, snippet: &str) -> Option<(usize, usize)> {
     Some((line, col))
 }
 
-pub fn print_diagnostics(lint_output: &LintOutput, code: &str) {
+/// Prints the diagnostic messages in human-readable form.
+pub fn print_pretty(lint_output: &LintOutput, code: &str) {
     let line_width = code.lines().count().to_string().len();
 
     for diagnostic in &lint_output.diagnostics {
@@ -76,6 +77,22 @@ pub fn print_diagnostics(lint_output: &LintOutput, code: &str) {
             .join("\n");
 
         println!("[{}] {}\n{}\n", severity, diagnostic.message, quoted);
+    }
+}
+
+/// Prints the diagnostic messages in 'file:line:col: severity: message' format.
+pub fn print_editor(lint_output: &LintOutput, code: &str, file: &str) {
+    for diagnostic in &lint_output.diagnostics {
+        let severity = match diagnostic.severity {
+            Severity::Error => "error",
+            Severity::Warning => "warning",
+            Severity::Suggestion => "suggestion",
+        };
+
+        let position = resolve_snippet(code, &diagnostic.code_quote);
+        let (line, col) = position.unwrap_or((1, 1));
+
+        println!("{file}:{line}:{col}: {severity}: {}", diagnostic.message)
     }
 }
 
