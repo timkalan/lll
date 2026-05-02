@@ -1,5 +1,6 @@
 use anyhow::Context;
 use clap::{Parser, ValueEnum};
+use colored::Colorize;
 use lll::{lint, print_editor, print_pretty};
 
 #[derive(Clone, Debug, ValueEnum)]
@@ -11,8 +12,9 @@ enum Format {
 #[derive(Parser, Debug)]
 #[command(name = "lll", version, about = "Large Language Lint")]
 struct Args {
-    /// File to lint
-    file: String,
+    /// Files to lint
+    #[arg(num_args = 1..)]
+    files: Vec<String>,
 
     /// Output format
     #[arg(long, short, value_enum, default_value_t = Format::Pretty)]
@@ -22,14 +24,36 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     let args = Args::parse();
-    let code = std::fs::read_to_string(&args.file)
-        .with_context(|| format!("Could not read file: {}", args.file))?;
+    let multi = args.files.len() > 1;
 
-    let response = lint(&code, &args.file).await?;
+    for file in &args.files {
+        let code = match std::fs::read_to_string(file)
+            .with_context(|| format!("Could not read file: {}", file))
+        {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("{e:#}");
+                continue;
+            }
+        };
 
-    match args.format {
-        Format::Pretty => print_pretty(&response, &code),
-        Format::Editor => print_editor(&response, &args.file),
+        let response = match lint(&code, file).await {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("{file}: {e:#}");
+                continue;
+            }
+        };
+
+        match args.format {
+            Format::Pretty => {
+                if multi {
+                    println!("{}\n", file.bold().underline());
+                }
+                print_pretty(&response, &code);
+            }
+            Format::Editor => print_editor(&response, file),
+        }
     }
 
     Ok(())
