@@ -18,34 +18,64 @@ enum Severity {
     Suggestion,
 }
 
-#[derive(Deserialize, Serialize, JsonSchema, Debug)]
-struct Diagnostic {
+/// Represents the span of the diagnostic: where the
+/// affected code begins and ends
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct Span {
+    start_line: usize,
+    start_column: usize,
+    end_line: usize,
+    end_column: usize,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema, Debug)]
+struct RawDiagnostic {
     severity: Severity,
     code_quote: String,
     message: String,
 }
 
-#[derive(Deserialize, Serialize, JsonSchema, Debug)]
-pub struct LintOutput {
-    diagnostics: Vec<Diagnostic>,
+#[derive(Serialize, Deserialize, JsonSchema, Debug)]
+pub struct RawLintOutput {
+    diagnostics: Vec<RawDiagnostic>,
 }
 
-/// Tries to resolve a code snippet to its 1-indexed (line, col),
+#[derive(Serialize, Debug)]
+pub struct Diagnostic {
+    severity: Severity,
+    code_quote: String,
+    message: String,
+    span: Option<Span>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct LintOutput {
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+/// Tries to resolve a code snippet to its 1-based inclusive on both ends span
+/// (which actual lines and columns it includes),
 /// returns `None` if no match.
-///
-/// ```ignore
-/// let (line, col) = resolve_snippet("a\nbc", "bc").unwrap();
-/// assert_eq!((line, col), (2, 1));
-/// ```
-fn resolve_snippet(code: &str, snippet: &str) -> Option<(usize, usize)> {
+fn resolve_snippet(code: &str, snippet: &str) -> Option<Span> {
     let offset = code.find(snippet)?;
     let before = &code[..offset];
-    let line = before.matches('\n').count() + 1;
-    let col = match before.rfind('\n') {
+    let start_line = before.matches('\n').count() + 1;
+    let start_column = match before.rfind('\n') {
         Some(last_newline) => offset - last_newline,
         None => offset + 1,
     };
-    Some((line, col))
+    let end_line = start_line + snippet.matches('\n').count();
+    let end_column = match snippet.rfind('\n') {
+        Some(last_newline) => snippet.len() - last_newline - 1,
+        None => snippet.len() + start_column - 1,
+    };
+
+    Some(Span {
+        start_line,
+        start_column,
+        end_line,
+        end_column,
+    })
 }
 
 /// Prints the diagnostic messages in human-readable form.
@@ -59,16 +89,17 @@ pub fn print_pretty(lint_output: &LintOutput, code: &str) {
             Severity::Suggestion => "suggestion".cyan().bold(),
         };
 
-        let position = resolve_snippet(code, &diagnostic.code_quote);
+        let span = &diagnostic.span;
 
         let quoted = diagnostic
             .code_quote
             .lines()
             .enumerate()
-            .map(|(i, l)| match position {
-                Some((line, _)) => {
+            .map(|(i, l)| match &span {
+                Some(position) => {
                     // 'dimmed' adds padding, we need to calculate first, then dim
-                    let num = format!("{:>width$}", line + i, width = line_width).dimmed();
+                    let num =
+                        format!("{:>width$}", position.start_line + i, width = line_width).dimmed();
                     format!("{} {} {l}", num, "|".dimmed())
                 }
                 None => format!("{:width$} {} {l}", "", "|".dimmed(), width = line_width),
@@ -81,7 +112,7 @@ pub fn print_pretty(lint_output: &LintOutput, code: &str) {
 }
 
 /// Prints the diagnostic messages in 'file:line:col: severity: message' format.
-pub fn print_editor(lint_output: &LintOutput, code: &str, file: &str) {
+pub fn print_editor(lint_output: &LintOutput, file: &str) {
     for diagnostic in &lint_output.diagnostics {
         let severity = match diagnostic.severity {
             Severity::Error => "error",
@@ -89,10 +120,14 @@ pub fn print_editor(lint_output: &LintOutput, code: &str, file: &str) {
             Severity::Suggestion => "suggestion",
         };
 
-        let position = resolve_snippet(code, &diagnostic.code_quote);
-        let (line, col) = position.unwrap_or((1, 1));
+        let Some(span) = &diagnostic.span else {
+            continue;
+        };
 
-        println!("{file}:{line}:{col}: {severity}: {}", diagnostic.message)
+        println!(
+            "{file}:{}:{}:{}:{}: {severity}: {}",
+            span.start_line, span.start_column, span.end_line, span.end_column, diagnostic.message
+        )
     }
 }
 
@@ -100,7 +135,7 @@ pub async fn lint(code: &str, file: &str) -> anyhow::Result<LintOutput> {
     let client = gemini::Client::from_env();
 
     let linter = client
-        .extractor::<LintOutput>("gemini-3.1-flash-lite-preview")
+        .extractor::<RawLintOutput>("gemini-3.1-flash-lite-preview")
         .preamble(PROMPT)
         .additional_params(json!({
             "generationConfig": {
@@ -109,7 +144,70 @@ pub async fn lint(code: &str, file: &str) -> anyhow::Result<LintOutput> {
         }))
         .build();
 
-    Ok(linter
+    let raw = linter
         .extract(format!("File: {}\n\n{}", file, code))
-        .await?)
+        .await?;
+
+    let diagnostics = raw
+        .diagnostics
+        .into_iter()
+        .map(|diagnostic| Diagnostic {
+            span: resolve_snippet(code, &diagnostic.code_quote),
+            severity: diagnostic.severity,
+            code_quote: diagnostic.code_quote,
+            message: diagnostic.message,
+        })
+        .collect();
+    Ok(LintOutput { diagnostics })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_line_snippet_on_line_2() {
+        let span = resolve_snippet("a\nbc", "bc").unwrap();
+        assert_eq!(
+            span,
+            Span {
+                start_line: 2,
+                start_column: 1,
+                end_line: 2,
+                end_column: 2
+            }
+        );
+    }
+
+    #[test]
+    fn multi_line_snippet() {
+        let span = resolve_snippet("xxx\nab\ncd", "ab\ncd").unwrap();
+        assert_eq!(
+            span,
+            Span {
+                start_line: 2,
+                start_column: 1,
+                end_line: 3,
+                end_column: 2
+            }
+        );
+    }
+
+    #[test]
+    fn hello_snippet() {
+        let span = resolve_snippet("hello", "ell").unwrap();
+        assert_eq!(
+            span,
+            Span {
+                start_line: 1,
+                start_column: 2,
+                end_line: 1,
+                end_column: 4,
+            }
+        );
+    }
+    #[test]
+    fn not_found_snippet() {
+        assert_eq!(resolve_snippet("foo", "bar"), None)
+    }
 }

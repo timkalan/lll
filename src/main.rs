@@ -29,7 +29,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     match args.format {
         Format::Pretty => print_pretty(&response, &code),
-        Format::Editor => print_editor(&response, &code, &args.file),
+        Format::Editor => print_editor(&response, &args.file),
     }
 
     Ok(())
