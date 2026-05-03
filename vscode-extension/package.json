@@ -1,0 +1,50 @@
+{
+  "name": "lll",
+  "displayName": "lll - Large Language Lint",
+  "description": "LLM-powered linter via the lll CLI",
+  "version": "0.0.1",
+  "publisher": "timkalan",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "configuration": {
+      "title": "lll",
+      "properties": {
+        "lll.command": {
+          "type": "string",
+          "default": "lll",
+          "description": "Path to the lll binary."
+        },
+        "lll.enabledLanguages": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [
+            "typescript",
+            "typescriptreact",
+            "javascript",
+            "javascriptreact",
+            "rust",
+            "python",
+            "go"
+          ],
+          "description": "Language IDs for which lll runs on save."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "tsc -p ./",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  }
+}
