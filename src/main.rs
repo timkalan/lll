@@ -1,3 +1,5 @@
+use std::process::ExitCode;
+
 use anyhow::Context;
 use clap::{Parser, ValueEnum};
 use colored::Colorize;
@@ -22,9 +24,10 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
+async fn main() -> ExitCode {
     let args = Args::parse();
     let multi = args.files.len() > 1;
+    let mut had_error = false;
 
     for file in &args.files {
         let code = match std::fs::read_to_string(file)
@@ -33,6 +36,7 @@ async fn main() -> Result<(), anyhow::Error> {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("{e:#}");
+                had_error = true;
                 continue;
             }
         };
@@ -41,6 +45,7 @@ async fn main() -> Result<(), anyhow::Error> {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("{file}: {e:#}");
+                had_error = true;
                 continue;
             }
         };
@@ -56,5 +61,9 @@ async fn main() -> Result<(), anyhow::Error> {
         }
     }
 
-    Ok(())
+    if had_error {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
 }

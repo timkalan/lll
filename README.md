@@ -12,7 +12,14 @@ Build from source:
 cargo install --path .
 ```
 
-Requires a Gemini API key set as `GEMINI_API_KEY`.
+Requires a Gemini API key. Either:
+
+- export `GEMINI_API_KEY` in the environment, or
+- write `gemini_api_key = "..."` to `~/.config/lll/config.toml` (`chmod 600` recommended).
+
+If both are set, the env var wins. The config file is more reliable for
+GUI-launched editors (e.g. VSCode opened from Spotlight) where shell env
+vars don't always propagate.
 
 ## Usage
 

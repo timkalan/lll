@@ -1,5 +1,6 @@
+use anyhow::Context;
 use colored::Colorize;
-use rig::client::{CompletionClient, ProviderClient};
+use rig::client::CompletionClient;
 use rig::providers::gemini;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -10,6 +11,11 @@ const PROMPT: &str = "
     Your goal is to catch things other linters might miss. Do not simply return what a generic
     linter for the given language might produce, but try to catch un-idiomatic behaviour or
     other general weirdness.";
+
+#[derive(Deserialize, Serialize, Debug)]
+struct Config {
+    gemini_api_key: Option<String>,
+}
 
 #[derive(Deserialize, Serialize, JsonSchema, Debug)]
 enum Severity {
@@ -78,6 +84,24 @@ fn resolve_snippet(code: &str, snippet: &str) -> Option<Span> {
     })
 }
 
+fn load_api_key() -> anyhow::Result<String> {
+    if let Ok(key) = std::env::var("GEMINI_API_KEY")
+        && !key.is_empty()
+    {
+        return Ok(key);
+    }
+    let home = std::env::var_os("HOME").context("HOME not set")?;
+    let path = std::path::PathBuf::from(home).join(".config/lll/config.toml");
+    let contents = std::fs::read_to_string(&path)
+        .with_context(|| format!("set GEMINI_API_KEY or create {}", path.display()))?;
+    let config: Config =
+        toml::from_str(&contents).with_context(|| format!("failed to parse {}", path.display()))?;
+    config
+        .gemini_api_key
+        .filter(|k| !k.is_empty())
+        .with_context(|| format!("missing `gemini_api_key` in {}", path.display()))
+}
+
 /// Prints the diagnostic messages in human-readable form.
 pub fn print_pretty(lint_output: &LintOutput, code: &str) {
     let line_width = code.lines().count().to_string().len();
@@ -132,7 +156,7 @@ pub fn print_editor(lint_output: &LintOutput, file: &str) {
 }
 
 pub async fn lint(code: &str, file: &str) -> anyhow::Result<LintOutput> {
-    let client = gemini::Client::from_env();
+    let client = gemini::Client::new(load_api_key()?)?;
 
     let linter = client
         .extractor::<RawLintOutput>("gemini-3.1-flash-lite-preview")
