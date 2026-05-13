@@ -910,6 +910,7 @@ dependencies = [
  "anyhow",
  "clap",
  "colored",
+ "futures",
  "rig-core",
  "schemars",
  "serde",

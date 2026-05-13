@@ -1,3 +1,4 @@
+use futures::future::join_all;
 use std::process::ExitCode;
 
 use anyhow::Context;
@@ -29,35 +30,33 @@ async fn main() -> ExitCode {
     let multi = args.files.len() > 1;
     let mut had_error = false;
 
-    for file in &args.files {
-        let code = match std::fs::read_to_string(file)
-            .with_context(|| format!("Could not read file: {}", file))
-        {
-            Ok(c) => c,
+    let jobs = args.files.iter().map(|file| async move {
+        let code = tokio::fs::read_to_string(file)
+            .await
+            .with_context(|| format!("Could not read file: {file}"))?;
+        let response = lint(&code, file).await?;
+        Ok::<_, anyhow::Error>((file.clone(), code, response))
+    });
+
+    // TODO: concurrency limit this
+    let results = join_all(jobs).await;
+
+    for result in results {
+        match result {
+            Ok((file, code, response)) => match args.format {
+                Format::Pretty => {
+                    if multi {
+                        println!("{}\n", file.bold().underline());
+                    }
+                    print_pretty(&response, &code);
+                }
+                Format::Editor => print_editor(&response, &file),
+            },
             Err(e) => {
                 eprintln!("{e:#}");
                 had_error = true;
                 continue;
             }
-        };
-
-        let response = match lint(&code, file).await {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("{file}: {e:#}");
-                had_error = true;
-                continue;
-            }
-        };
-
-        match args.format {
-            Format::Pretty => {
-                if multi {
-                    println!("{}\n", file.bold().underline());
-                }
-                print_pretty(&response, &code);
-            }
-            Format::Editor => print_editor(&response, file),
         }
     }
 
