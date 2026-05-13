@@ -159,7 +159,7 @@ pub async fn lint(code: &str, file: &str) -> anyhow::Result<LintOutput> {
     let client = gemini::Client::new(load_api_key()?)?;
 
     let linter = client
-        .extractor::<RawLintOutput>("gemini-3.1-flash-lite-preview")
+        .extractor::<RawLintOutput>("gemini-3.1-flash-lite")
         .preamble(PROMPT)
         .additional_params(json!({
             "generationConfig": {
