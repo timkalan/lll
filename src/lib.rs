@@ -34,6 +34,15 @@ struct Span {
     end_column: usize,
 }
 
+/// A diagnostic already reported by the editor's LSP/linters.
+#[derive(Deserialize, Debug)]
+struct ExistingDiagnostic {
+    line: usize,
+    message: String,
+    #[serde(default)]
+    source: Option<String>,
+}
+
 #[derive(Serialize, Deserialize, JsonSchema, Debug)]
 struct RawDiagnostic {
     severity: Severity,
@@ -82,6 +91,35 @@ fn resolve_snippet(code: &str, snippet: &str) -> Option<Span> {
         end_line,
         end_column,
     })
+}
+
+/// Renders existing editor diagnostics into a prompt section that tells the
+/// model to skip them. Returns `None` when the input is empty or unparsable.
+fn format_existing_diagnostics(json: &str) -> Option<String> {
+    let parsed: Vec<ExistingDiagnostic> = match serde_json::from_str(json) {
+        Ok(diagnostics) => diagnostics,
+        Err(error) => {
+            eprintln!("lll: ignoring malformed --diagnostics: {error}");
+            return None;
+        }
+    };
+    if parsed.is_empty() {
+        return None;
+    }
+
+    let mut section = String::from(
+        "\n\nThe following issues are ALREADY reported by other linters/LSPs for \
+         this file. Do NOT report these, or the same underlying issue worded \
+         differently:\n",
+    );
+    for diagnostic in &parsed {
+        let source = diagnostic.source.as_deref().unwrap_or("other");
+        section.push_str(&format!(
+            "- line {} [{}]: {}\n",
+            diagnostic.line, source, diagnostic.message
+        ));
+    }
+    Some(section)
 }
 
 fn load_api_key() -> anyhow::Result<String> {
@@ -155,7 +193,7 @@ pub fn print_editor(lint_output: &LintOutput, file: &str) {
     }
 }
 
-pub async fn lint(code: &str, file: &str) -> anyhow::Result<LintOutput> {
+pub async fn lint(code: &str, file: &str, diagnostics: Option<&str>) -> anyhow::Result<LintOutput> {
     let client = gemini::Client::new(load_api_key()?)?;
 
     let linter = client
@@ -168,8 +206,12 @@ pub async fn lint(code: &str, file: &str) -> anyhow::Result<LintOutput> {
         }))
         .build();
 
+    let existing = diagnostics
+        .and_then(format_existing_diagnostics)
+        .unwrap_or_default();
+
     let raw = linter
-        .extract(format!("File: {}\n\n{}", file, code))
+        .extract(format!("File: {}\n\n{}{}", file, code, existing))
         .await?;
 
     let diagnostics = raw

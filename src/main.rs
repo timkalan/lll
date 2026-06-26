@@ -22,6 +22,11 @@ struct Args {
     /// Output format
     #[arg(long, short, value_enum, default_value_t = Format::Pretty)]
     format: Format,
+
+    /// JSON array of diagnostics already reported by the editor's LSP/linters,
+    /// so the model can avoid duplicating them. Intended for editor integrations.
+    #[arg(long, short)]
+    diagnostics: Option<String>,
 }
 
 #[tokio::main]
@@ -30,11 +35,12 @@ async fn main() -> ExitCode {
     let multi = args.files.len() > 1;
     let mut had_error = false;
 
+    let diagnostics = args.diagnostics.as_deref();
     let jobs = args.files.iter().map(|file| async move {
         let code = tokio::fs::read_to_string(file)
             .await
             .with_context(|| format!("Could not read file: {file}"))?;
-        let response = lint(&code, file).await?;
+        let response = lint(&code, file, diagnostics).await?;
         Ok::<_, anyhow::Error>((file.clone(), code, response))
     });
 
